@@ -370,7 +370,7 @@ function showOrders(orders){
     }  
 
     const name = order.name || order.customerName || order.fullName || "नाम नहीं मिला";  
-    const phone = order.phone || order.mobile || order.phoneNumber || "मोबाइल नहीं मिला";  
+    const phone = order.phone || order.mobile || order.phoneNumber || order.customerPhone || "मोबाइल नहीं मिला";  
     const product = order.product || order.productName || order.item || "Product नहीं मिला";  
     const amount = order.amount || order.total || order.price || order.totalAmount || "0";  
     const address = order.address || order.deliveryAddress || "पता नहीं मिला";  
