@@ -2,73 +2,147 @@
 <html lang="hi">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Topper Stitching - Owner Dashboard</title>
   <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
   <style>
-    body { font-family: sans-serif; text-align: center; padding: 40px; background: #f4f4f9; }
-    .card { background: white; padding: 20px; border-radius: 12px; max-width: 400px; margin: auto; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
-    button { padding: 12px 24px; font-size: 16px; border: none; border-radius: 6px; cursor: pointer; margin: 10px; }
-    .accept { background: #28a745; color: white; }
-    .reject { background: #dc3545; color: white; }
+    * {box-sizing:border-box;font-family:sans-serif;margin:0;padding:0;}
+    body {background:#075e54;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;padding:20px;text-align:center;}
+    .dashboard-card {background:#128c7e;padding:30px;border-radius:20px;width:100%;max-width:400px;box-shadow:0 10px 30px rgba(0,0,0,0.3);}
+    h2 {color:#ffab00;margin-bottom:10px;}
+    p {font-size:16px;margin:15px 0;opacity:0.9;}
+    .btn {padding:12px 25px;font-size:16px;border:none;border-radius:30px;cursor:pointer;font-weight:bold;margin:10px;box-shadow:0 4px 10px rgba(0,0,0,0.2);}
+    .accept {background:#25d366;color:#white;}
+    .reject {background:#dc3545;color:white;}
+    .control-row {display:flex;justify-content:center;gap:15px;margin-top:20px;}
+    .circle-btn {width:60px;height:60px;border-radius:50%;border:none;font-size:22px;cursor:pointer;display:flex;align-items:center;justify-content:center;}
   </style>
 </head>
 <body>
 
-<div class="card">
-  <h2>Topper Stitching Support</h2>
-  <p id="status">कनेक्ट हो रहा है...</p>
+<div class="dashboard-card">
+  <h2>Topper Stitching Owner</h2>
+  <p id="statusText">ऑनलाइन हैं, कॉल का इंतज़ार है...</p>
   
-  <div id="incomingCall" style="display:none;">
-    <p><strong>📞 ग्राहक का कॉल आ रहा है!</strong></p>
-    <button class="accept" onclick="acceptCall()">कॉल उठाएँ (Accept)</button>
-    <button class="reject" onclick="rejectCall()">काटें (Reject)</button>
+  <!-- इनकमिंग कॉल आने पर दिखने वाला बॉक्स -->
+  <div id="incomingBox" style="display:none;">
+    <p style="font-size:18px; font-weight:bold;">📞 ग्राहक का कॉल आ रहा है!</p>
+    <div>
+      <button class="btn accept" onclick="acceptIncomingCall()">उठाएँ (Accept)</button>
+      <button class="btn reject" onclick="rejectIncomingCall()">काटें (Reject)</button>
+    </div>
   </div>
 
-  <audio id="remoteAudio" autoplay></audio>
+  <!-- कॉल कनेक्ट होने के बाद दिखने वाले कंट్రోल्स -->
+  <div id="activeCallBox" style="display:none;">
+    <p id="connectedTimer" style="font-size:20px; color:#25d366; font-weight:bold;">🟢 बात हो रही है...</p>
+    <div class="control-row">
+      <button class="circle-btn" id="ownerMuteBtn" onclick="toggleOwnerMute()" style="background:rgba(255,255,255,0.2);color:#fff;" title="Mute">🎤</button>
+      <button class="circle-btn" onclick="hangUpCall()" style="background:#dc3545;color:#fff;width:70px;height:70px;font-size:26px;" title="End">📞</button>
+      <button class="circle-btn" id="ownerSpeakerBtn" onclick="toggleOwnerSpeaker()" style="background:rgba(255,255,255,0.2);color:#fff;" title="Speaker">🔊</button>
+    </div>
+  </div>
+
+  <audio id="ownerRemoteAudio" autoplay></audio>
 </div>
 
-<!-- रिंगटोन के लिए ऑडियो (बेसिक बीप सायरन) -->
-<audio id="ringtone" src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" loop></audio>
+<!-- रिंगटोन ऑडियो -->
+<audio id="ringtoneAudio" src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" loop></audio>
 
 <script>
   const peer = new Peer('topper-stitching-owner');
-  let currentCall = null;
-  const ringtone = document.getElementById('ringtone');
+  let incomingCallRef = null;
+  let activeCallRef = null;
+  let localStreamRef = null;
+  let isOwnerMuted = false;
+  let isOwnerSpeakerOn = true;
+
+  const ringtone = document.getElementById('ringtoneAudio');
 
   peer.on('open', (id) => {
-    document.getElementById('status').innerText = 'ऑनलाइन हैं, कॉल का इंतज़ार है...';
+    document.getElementById('statusText').innerText = 'डैशबोर्ड तैयार है (Online)';
   });
 
+  // जब ग्राहक कॉल करेगा
   peer.on('call', (call) => {
-    currentCall = call;
-    document.getElementById('incomingCall').style.display = 'block';
-    document.getElementById('status').innerText = 'इनकमिंग कॉल बज रही है!';
+    incomingCallRef = call;
+    document.getElementById('statusText').style.display = 'none';
+    document.getElementById('incomingBox').style.display = 'block';
     
     // घंटी बजाना शुरू करें
-    ringtone.play().catch(e => console.log("Audio play error:", e));
+    ringtone.play().catch(e => console.log(e));
   });
 
-  function acceptCall() {
+  function acceptIncomingCall(){
     ringtone.pause();
     ringtone.currentTime = 0;
-    
-    navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
-      currentCall.answer(stream);
-      currentCall.on('stream', (remoteStream) => {
-        document.getElementById('remoteAudio').srcObject = remoteStream;
+
+    navigator.mediaDevices.getUserMedia({ audio: true, video: false }).then(stream => {
+      localStreamRef = stream;
+      incomingCallRef.answer(stream);
+      activeCallRef = incomingCallRef;
+
+      activeCallRef.on('stream', remoteStream => {
+        const audio = document.getElementById('ownerRemoteAudio');
+        audio.srcObject = remoteStream;
+        audio.play().catch(e => console.log(e));
       });
-      document.getElementById('incomingCall').style.display = 'none';
-      document.getElementById('status').innerText = 'कॉल कनेक्ट हो गई है 🟢';
+
+      activeCallRef.on('close', () => {
+        resetDashboard();
+      });
+
+      document.getElementById('incomingBox').style.display = 'none';
+      document.getElementById('activeCallBox').style.display = 'block';
+    }).catch(err => {
+      alert("माइक्रोफ़ोन की अनुमति ज़रूरी है।");
+      resetDashboard();
     });
   }
 
-  function rejectCall() {
+  function rejectIncomingCall(){
     ringtone.pause();
     ringtone.currentTime = 0;
-    
-    if (currentCall) currentCall.close();
-    document.getElementById('incomingCall').style.display = 'none';
-    document.getElementById('status').innerText = 'ऑनलाइन हैं, कॉल का इंतज़ार है...';
+    if(incomingCallRef) incomingCallRef.close();
+    resetDashboard();
+  }
+
+  function hangUpCall(){
+    if(activeCallRef) { try{ activeCallRef.close(); }catch(e){} }
+    resetDashboard();
+  }
+
+  function resetDashboard(){
+    if(localStreamRef){
+      localStreamRef.getTracks().forEach(t => t.stop());
+    }
+    incomingCallRef = null;
+    activeCallRef = null;
+    localStreamRef = null;
+    isOwnerMuted = false;
+    isOwnerSpeakerOn = true;
+    document.getElementById('ownerMuteBtn').style.background = "rgba(255,255,255,0.2)";
+    document.getElementById('ownerSpeakerBtn').style.background = "rgba(255,255,255,0.2)";
+    document.getElementById('incomingBox').style.display = 'none';
+    document.getElementById('activeCallBox').style.display = 'none';
+    document.getElementById('statusText').style.display = 'block';
+    document.getElementById('statusText').innerText = 'डैशबोर्ड तैयार है (Online)';
+  }
+
+  function toggleOwnerMute(){
+    if(!localStreamRef) return;
+    isOwnerMuted = !isOwnerMuted;
+    localStreamRef.getAudioTracks().forEach(t => t.enabled = !isOwnerMuted);
+    document.getElementById('ownerMuteBtn').style.background = isOwnerMuted ? "#fff" : "rgba(255,255,255,0.2)";
+    document.getElementById('ownerMuteBtn').style.color = isOwnerMuted ? "#333" : "#fff";
+  }
+
+  function toggleOwnerSpeaker(){
+    isOwnerSpeakerOn = !isOwnerSpeakerOn;
+    const audio = document.getElementById('ownerRemoteAudio');
+    audio.volume = isOwnerSpeakerOn ? 1.0 : 0.2;
+    document.getElementById('ownerSpeakerBtn').style.background = !isOwnerSpeakerOn ? "#fff" : "rgba(255,255,255,0.2)";
+    document.getElementById('ownerSpeakerBtn').style.color = !isOwnerSpeakerOn ? "#333" : "#fff";
   }
 </script>
 
