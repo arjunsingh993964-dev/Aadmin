@@ -57,6 +57,13 @@
 
   const ringtone = document.getElementById('ringtoneAudio');
 
+  function stopRingtone(){
+    if(ringtone){
+      ringtone.pause();
+      ringtone.currentTime = 0;
+    }
+  }
+
   peer.on('open', (id) => {
     document.getElementById('statusText').innerText = 'डैशबोर्ड तैयार है (Online)';
   });
@@ -65,15 +72,24 @@
     incomingCallRef = call;
     document.getElementById('statusText').style.display = 'none';
     document.getElementById('incomingBox').style.display = 'block';
+    
+    // घंटी बजाएँ
     ringtone.play().catch(e => console.log(e));
+
+    // अगर ग्राहक कॉल काट दे या टाइम-आउट हो जाए
+    call.on('close', () => {
+      resetDashboard();
+    });
+
+    call.on('error', () => {
+      resetDashboard();
+    });
   });
 
   async function acceptIncomingCall(){
-    ringtone.pause();
-    ringtone.currentTime = 0;
+    stopRingtone();
 
     try {
-      // 1. माइक्रोफ़ोन स्ट्रीम प्राप्त करें (Echo Cancellation और Noise Suppression के साथ)
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
@@ -85,15 +101,13 @@
 
       localStreamRef = stream;
 
-      // 2. कॉल का उत्तर दें और ओनर की माइक स्ट्रीम ग्राहक को भेजें
       incomingCallRef.answer(stream);
       activeCallRef = incomingCallRef;
 
-      // 3. ग्राहक की आवाज प्राप्त करें
       activeCallRef.on('stream', remoteStream => {
         const audio = document.getElementById('ownerRemoteAudio');
         audio.srcObject = remoteStream;
-        audio.volume = 1.0; // डिफ़ॉल्ट रूप से फुल आवाज
+        audio.volume = 1.0;
         audio.play().catch(e => console.log("Audio play error:", e));
       });
 
@@ -104,7 +118,6 @@
       document.getElementById('incomingBox').style.display = 'none';
       document.getElementById('activeCallBox').style.display = 'block';
 
-      // शुरुआती स्टेट सेट करें
       isOwnerSpeakerOn = true;
       isOwnerMuted = false;
       updateOwnerControlsUI();
@@ -116,8 +129,7 @@
   }
 
   function rejectIncomingCall(){
-    ringtone.pause();
-    ringtone.currentTime = 0;
+    stopRingtone();
     if(incomingCallRef) incomingCallRef.close();
     resetDashboard();
   }
@@ -128,6 +140,7 @@
   }
 
   function resetDashboard(){
+    stopRingtone(); // घंटी तुरंत बंद करें
     if(localStreamRef){
       localStreamRef.getTracks().forEach(t => t.stop());
     }
@@ -144,7 +157,6 @@
     updateOwnerControlsUI();
   }
 
-  // म्यूट बटन का फंक्शन
   function toggleOwnerMute(){
     if(!localStreamRef) return;
     isOwnerMuted = !isOwnerMuted;
@@ -154,19 +166,15 @@
     updateOwnerControlsUI();
   }
 
-  // स्पीकर बटन का फिक्स किया हुआ फंक्शन
   function toggleOwnerSpeaker(){
     isOwnerSpeakerOn = !isOwnerSpeakerOn;
     const audio = document.getElementById('ownerRemoteAudio');
-    
-    // जब ऑन रहेगा तो फुल वॉल्यूम (1.0), बंद करने पर कम वॉल्यूम (0.1)
     if(audio) {
       audio.volume = isOwnerSpeakerOn ? 1.0 : 0.1;
     }
     updateOwnerControlsUI();
   }
 
-  // बटन के रंग/दिखावट को सही से अपडेट करने का फंक्शन
   function updateOwnerControlsUI(){
     const muteBtn = document.getElementById('ownerMuteBtn');
     const speakerBtn = document.getElementById('ownerSpeakerBtn');
@@ -183,10 +191,10 @@
 
     if(speakerBtn){
       if(isOwnerSpeakerOn){
-        speakerBtn.classList.add('active'); // ऑन होने पर सफेद (Active) रहेगा
+        speakerBtn.classList.add('active');
         speakerBtn.title = "Speaker Off";
       } else {
-        speakerBtn.classList.remove('active'); // ऑफ होने पर डार्क रहेगा
+        speakerBtn.classList.remove('active');
         speakerBtn.title = "Speaker On";
       }
     }
