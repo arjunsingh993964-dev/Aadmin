@@ -4,6 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Topper Stitching - Owner Dashboard</title>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
   <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
   <style>
     * {box-sizing:border-box;font-family:sans-serif;margin:0;padding:0;}
@@ -17,11 +20,27 @@
     .control-row {display:flex;justify-content:center;gap:15px;margin-top:20px;}
     .circle-btn {width:60px;height:60px;border-radius:50%;border:none;font-size:22px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:0.2s;}
     .circle-btn.active {background:#fff !important;color:#333 !important;}
+    #loginScreen, #restrictedScreen {display:none;}
   </style>
 </head>
 <body>
 
-<div class="dashboard-card">
+<!-- लॉगिन स्क्रीन (यदि ओनर लॉगिन नहीं है) -->
+<div class="dashboard-card" id="loginScreen">
+  <h2>Owner Login</h2>
+  <p>कृपया ऑथराइज्ड ओनर अकाउंट से साइन इन करें।</p>
+  <button class="btn accept" onclick="ownerGoogleSignIn()">Google से साइन इन करें</button>
+</div>
+
+<!-- रिस्ट्रिक्टेड स्क्रीन (यदि कोई दूसरा यूजर लॉगिन हो जाए) -->
+<div class="dashboard-card" id="restrictedScreen">
+  <h2 style="color:#ff5252;">Access Denied</h2>
+  <p>यह ओनर डैशबोर्ड केवल अधिकृत एडमिन के लिए है।</p>
+  <button class="btn reject" onclick="ownerSignOut()">लॉग आउट करें</button>
+</div>
+
+<!-- मुख्य ओनर डैशबोर्ड (केवल सही ईमेल के लिए खुलेगा) -->
+<div class="dashboard-card" id="dashboardScreen" style="display:none;">
   <h2>Topper Stitching Owner</h2>
   <p id="statusText">ऑनलाइन हैं, कॉल का इंतज़ार है...</p>
   
@@ -42,65 +61,97 @@
     </div>
   </div>
 
+  <button class="btn reject" onclick="ownerSignOut()" style="font-size:13px; padding:6px 15px; margin-top:20px;">लॉग आउट</button>
   <audio id="ownerRemoteAudio" autoplay></audio>
 </div>
 
 <audio id="ringtoneAudio" src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" loop></audio>
 
 <script>
-  const peer = new Peer('topper-stitching-owner');
+  const firebaseConfig={ 
+    apiKey:"AIzaSyDrsMo4f15JZxUk8LkNYqlYqfzEHOQ8Q4w", 
+    authDomain:"toppersewingmachine.firebaseapp.com", 
+    databaseURL:"https://toppersewingmachine-default-rtdb.firebaseio.com", 
+    projectId:"toppersewingmachine", 
+    storageBucket:"toppersewingmachine.firebasestorage.app", 
+    messagingSenderId:"281176461879", 
+    appId:"1:281176461879:web:97648170de01d8c975e5b2", 
+    measurementId:"G-GRP6EXGE3L" 
+  }; 
+
+  if(!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+  const auth = firebase.auth();
+  const db = firebase.database();
+  auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(()=>{});
+
+  const AUTHORIZED_EMAIL = "ankiteeepad009@gmail.com";
+  let peer = null;
   let incomingCallRef = null;
   let activeCallRef = null;
   let localStreamRef = null;
   let isOwnerMuted = false;
   let isOwnerSpeakerOn = true;
-
   const ringtone = document.getElementById('ringtoneAudio');
 
   function stopRingtone(){
-    if(ringtone){
-      ringtone.pause();
-      ringtone.currentTime = 0;
-    }
+    if(ringtone){ ringtone.pause(); ringtone.currentTime = 0; }
   }
 
-  peer.on('open', (id) => {
-    document.getElementById('statusText').innerText = 'डैशबोर्ड तैयार है (Online)';
+  auth.onAuthStateChanged(user => {
+    if(!user){
+      document.getElementById('loginScreen').style.display = 'block';
+      document.getElementById('restrictedScreen').style.display = 'none';
+      document.getElementById('dashboardScreen').style.display = 'none';
+    } else if(user.email === AUTHORIZED_EMAIL){
+      document.getElementById('loginScreen').style.display = 'none';
+      document.getElementById('restrictedScreen').style.display = 'none';
+      document.getElementById('dashboardScreen').style.display = 'block';
+      initPeer();
+    } else {
+      document.getElementById('loginScreen').style.display = 'none';
+      document.getElementById('dashboardScreen').style.display = 'none';
+      document.getElementById('restrictedScreen').style.display = 'block';
+    }
   });
 
-  peer.on('call', (call) => {
-    incomingCallRef = call;
-    document.getElementById('statusText').style.display = 'none';
-    document.getElementById('incomingBox').style.display = 'block';
-    
-    // घंटी बजाएँ
-    ringtone.play().catch(e => console.log(e));
+  function ownerGoogleSignIn(){
+    const provider = new firebase.auth.GoogleAuthProvider();
+    auth.signInWithPopup(provider).catch(err => alert("लॉगिन असफल: " + err.message));
+  }
 
-    // अगर ग्राहक कॉल काट दे या टाइम-आउट हो जाए
-    call.on('close', () => {
-      resetDashboard();
+  function ownerSignOut(){
+    stopRingtone();
+    if(peer) peer.destroy();
+    auth.signOut();
+  }
+
+  function initPeer(){
+    if(peer) return;
+    peer = new Peer('topper-stitching-owner');
+
+    peer.on('open', (id) => {
+      document.getElementById('statusText').innerText = 'डैशबोर्ड तैयार है (Online)';
     });
 
-    call.on('error', () => {
-      resetDashboard();
+    peer.on('call', (call) => {
+      incomingCallRef = call;
+      document.getElementById('statusText').style.display = 'none';
+      document.getElementById('incomingBox').style.display = 'block';
+      ringtone.play().catch(e => console.log(e));
+
+      call.on('close', () => { resetDashboard(); });
+      call.on('error', () => { resetDashboard(); });
     });
-  });
+  }
 
   async function acceptIncomingCall(){
     stopRingtone();
-
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        },
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
         video: false
       });
-
       localStreamRef = stream;
-
       incomingCallRef.answer(stream);
       activeCallRef = incomingCallRef;
 
@@ -108,22 +159,18 @@
         const audio = document.getElementById('ownerRemoteAudio');
         audio.srcObject = remoteStream;
         audio.volume = 1.0;
-        audio.play().catch(e => console.log("Audio play error:", e));
+        audio.play().catch(e => console.log(e));
       });
 
-      activeCallRef.on('close', () => {
-        resetDashboard();
-      });
+      activeCallRef.on('close', () => { resetDashboard(); });
 
       document.getElementById('incomingBox').style.display = 'none';
       document.getElementById('activeCallBox').style.display = 'block';
-
       isOwnerSpeakerOn = true;
       isOwnerMuted = false;
       updateOwnerControlsUI();
-
     } catch(err) {
-      alert("माइक्रोफ़ोन चालू करने में असमर्थ। अनुमति (Permission) दें और पुनः प्रयास करें।");
+      alert("माइक्रोफ़ोन चालू करने में असमर्थ। अनुमति दें।");
       resetDashboard();
     }
   }
@@ -140,10 +187,8 @@
   }
 
   function resetDashboard(){
-    stopRingtone(); // घंटी तुरंत बंद करें
-    if(localStreamRef){
-      localStreamRef.getTracks().forEach(t => t.stop());
-    }
+    stopRingtone();
+    if(localStreamRef){ localStreamRef.getTracks().forEach(t => t.stop()); }
     incomingCallRef = null;
     activeCallRef = null;
     localStreamRef = null;
@@ -160,43 +205,27 @@
   function toggleOwnerMute(){
     if(!localStreamRef) return;
     isOwnerMuted = !isOwnerMuted;
-    localStreamRef.getAudioTracks().forEach(t => {
-      t.enabled = !isOwnerMuted;
-    });
+    localStreamRef.getAudioTracks().forEach(t => { t.enabled = !isOwnerMuted; });
     updateOwnerControlsUI();
   }
 
   function toggleOwnerSpeaker(){
     isOwnerSpeakerOn = !isOwnerSpeakerOn;
     const audio = document.getElementById('ownerRemoteAudio');
-    if(audio) {
-      audio.volume = isOwnerSpeakerOn ? 1.0 : 0.1;
-    }
+    if(audio) { audio.volume = isOwnerSpeakerOn ? 1.0 : 0.1; }
     updateOwnerControlsUI();
   }
 
   function updateOwnerControlsUI(){
     const muteBtn = document.getElementById('ownerMuteBtn');
     const speakerBtn = document.getElementById('ownerSpeakerBtn');
-
     if(muteBtn){
-      if(isOwnerMuted){
-        muteBtn.classList.add('active');
-        muteBtn.title = "Unmute";
-      } else {
-        muteBtn.classList.remove('active');
-        muteBtn.title = "Mute";
-      }
+      muteBtn.classList.toggle('active', isOwnerMuted);
+      muteBtn.title = isOwnerMuted ? "Unmute" : "Mute";
     }
-
     if(speakerBtn){
-      if(isOwnerSpeakerOn){
-        speakerBtn.classList.add('active');
-        speakerBtn.title = "Speaker Off";
-      } else {
-        speakerBtn.classList.remove('active');
-        speakerBtn.title = "Speaker On";
-      }
+      speakerBtn.classList.toggle('active', isOwnerSpeakerOn);
+      speakerBtn.title = isOwnerSpeakerOn ? "Speaker Off" : "Speaker On";
     }
   }
 </script>
